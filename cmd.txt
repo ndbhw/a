@@ -1,0 +1,11 @@
+cd C:\Users\binhn\Downloads\Git_upload
+git init -b master
+git remote add origin https://github.com/ndbhw/a.git
+git add -A
+git commit -m "sync"
+git push -f origin master
+
+cd C:\Users\binhn\Downloads\Git_upload
+git add -A
+git commit -m "sync"
+git push -f origin master
