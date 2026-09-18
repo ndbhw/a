@@ -26,11 +26,10 @@ module RU_TOP(
 
     wire                                PWM_FROM_FPGA;
 
-    // AMP_AMC SPI
-    wire                                FPGA_AMP_AMC_SPI_SDI;
-    wire                                FPGA_AMP_AMC_SPI_SCLK;
-    wire                                FPGA_AMP_AMC_SPI_CS_L;
-    wire                                AMP_FPGA_AMC_SPI_SDO;
+    wire                                AMC_SPI_SDI;
+    wire                                AMC_SPI_SCLK;
+    wire                                AMC_SPI_CS_L;
+    wire                                AMC_SPI_SDO;
 
     // RFIC SPI / UART
     wire                                RFIC_SPI_CS;
@@ -40,15 +39,26 @@ module RU_TOP(
     wire                                RFIC_UART_IN;
     wire                                RFIC_UART_OUT;
 
-    wire    [7:0]                       w_gmii_enet0_rxd;
-    wire    [2:0]                       w_gmii_enet0_speed_mode;
-    wire    [7:0]                       w_gmii_enet0_txd;
-    wire                                w_gmii_enet0_tx_en;
-    wire                                w_gmii_enet0_tx_er;
-    wire                                w_mdio_enet0_mdc;
-    wire                                w_mdio_enet0_mdio_io;
+    wire    [3:0]                       UDE_ETH_RXD;
+    wire    [3:0]                       UDE_ETH_TXD;
+    wire    [3:0]                       w_dummy_txd;
+    wire                                UDE_ETH_COL;
+    wire                                UDE_ETH_CRS;
+    wire                                UDE_ETH_TXC;
+    wire                                UDE_ETH_TXEN;
+    wire                                UDE_ETH_RXC;
+    wire                                UDE_ETH_RXDV;
+    wire                                UDE_ETH_RXER;
+    wire                                UDE_ETH_MDC;
+    wire                                UDE_ETH_MDIO;
 
-    assign w_gmii_enet0_rxd = 8'h0;
+    assign UDE_ETH_RXD  = 4'h0;
+    assign UDE_ETH_COL  = 1'b0;
+    assign UDE_ETH_CRS  = 1'b0;
+    assign UDE_ETH_TXC  = 1'b0;
+    assign UDE_ETH_RXC  = 1'b0;
+    assign UDE_ETH_RXDV = 1'b0;
+    assign UDE_ETH_RXER = 1'b0;
 
     //--------------------------------------------------------------------------
     // OPTIC
@@ -73,19 +83,19 @@ module RU_TOP(
     //--------------------------------------------------------------------------
     // U01_MPSoC_CPU - wire define
     //--------------------------------------------------------------------------
-    wire    [63:0]                      w_dl_oran_axis_0_tdata;
-    wire    [7:0]                       w_dl_oran_axis_0_tkeep;
-    wire                                w_dl_oran_axis_0_tlast;
-    wire                                w_dl_oran_axis_0_tvalid;
+    wire    [63:0]                      mac0_rx_data;
+    wire    [7:0]                       mac0_rx_keep;
+    wire                                mac0_rx_last;
+    wire                                mac0_rx_valid;
 
-    wire    [63:0]                      w_ul_oran_axis_0_tdata;
-    wire    [7:0]                       w_ul_oran_axis_0_tkeep;
-    wire                                w_ul_oran_axis_0_tlast;
-    wire                                w_ul_oran_axis_0_tready;
-    wire                                w_ul_oran_axis_0_tvalid;
+    wire    [63:0]                      mac0_tx_data;
+    wire    [7:0]                       mac0_tx_keep;
+    wire                                mac0_tx_last;
+    wire                                mac0_tx_ready;
+    wire                                mac0_tx_valid;
 
-    wire                                w_dma_block_reset;
-    wire                                w_mac_sys_reset;
+    wire                                dma_block_reset;
+    wire                                mac_sys_reset;
     wire    [1:0]                       w_rx_wdt_reset;
 
     wire                                w_emio_gpio;
@@ -95,7 +105,7 @@ module RU_TOP(
     wire                                w_fclk_nrst;
     wire                                w_axi_rstn;
 
-    wire                                w_cpu_frame_sync;
+    wire    [1-1 : 0]                   frame_sync_cpu_top;
     wire    [9:0]                       w_cpu_sfn_num;
 
     wire                                w_fh_qpll_reset;
@@ -108,8 +118,8 @@ module RU_TOP(
     wire    [4:0]                       w_ecpri_txprecursor  [1:0];
     wire    [4:0]                       w_ecpri_txpostcusor  [1:0];
 
-    wire                                w_l0_deframer_clk;
-    wire                                w_l1_deframer_clk;
+    wire                                l0_deframer_clk;
+    wire                                l1_deframer_clk;
 
     wire    [1:0]                       w_stat_rx_block_lock;
     wire    [1:0]                       w_stat_rx_local_fault;
@@ -122,7 +132,7 @@ module RU_TOP(
     wire                                w_uart_ook1_txd;
     wire                                w_uart_ook1_rxd;
 
-    wire                                w_ptp_1pps;
+    wire                                ptp_1pps_cpu_top;
 
     wire    [19:0]                      w_cpu_addr;
     wire                                w_cpu_cs;
@@ -132,41 +142,41 @@ module RU_TOP(
     wire                                w_cpu_wren;
 
     // JESD AXI interconnect: master side driven by the BD, slave side idle
-    wire    [31:0]                      w_jesd_axi_interconnect_araddr_cpu;
-    wire    [1:0]                       w_jesd_axi_interconnect_arburst_cpu;
-    wire    [3:0]                       w_jesd_axi_interconnect_arcache_cpu;
-    wire    [7:0]                       w_jesd_axi_interconnect_arlen_cpu;
-    wire    [0:0]                       w_jesd_axi_interconnect_arlock_cpu;
-    wire    [2:0]                       w_jesd_axi_interconnect_arprot_cpu;
-    wire    [3:0]                       w_jesd_axi_interconnect_arqos_cpu;
-    wire                                w_jesd_axi_interconnect_arready_dcif;
-    wire    [3:0]                       w_jesd_axi_interconnect_arregion_cpu;
-    wire    [2:0]                       w_jesd_axi_interconnect_arsize_cpu;
-    wire                                w_jesd_axi_interconnect_arvalid_cpu;
-    wire    [31:0]                      w_jesd_axi_interconnect_awaddr_cpu;
-    wire    [1:0]                       w_jesd_axi_interconnect_awburst_cpu;
-    wire    [3:0]                       w_jesd_axi_interconnect_awcache_cpu;
-    wire    [7:0]                       w_jesd_axi_interconnect_awlen_cpu;
-    wire    [0:0]                       w_jesd_axi_interconnect_awlock_cpu;
-    wire    [2:0]                       w_jesd_axi_interconnect_awprot_cpu;
-    wire    [3:0]                       w_jesd_axi_interconnect_awqos_cpu;
-    wire                                w_jesd_axi_interconnect_awready_dcif;
-    wire    [3:0]                       w_jesd_axi_interconnect_awregion_cpu;
-    wire    [2:0]                       w_jesd_axi_interconnect_awsize_cpu;
-    wire                                w_jesd_axi_interconnect_awvalid_cpu;
-    wire                                w_jesd_axi_interconnect_bready_cpu;
-    wire    [1:0]                       w_jesd_axi_interconnect_bresp_dcif;
-    wire                                w_jesd_axi_interconnect_bvalid_dcif;
-    wire    [31:0]                      w_jesd_axi_interconnect_rdata_dcif;
-    wire                                w_jesd_axi_interconnect_rlast_dcif;
-    wire                                w_jesd_axi_interconnect_rready_cpu;
-    wire    [1:0]                       w_jesd_axi_interconnect_rresp_dcif;
-    wire                                w_jesd_axi_interconnect_rvalid_dcif;
-    wire    [31:0]                      w_jesd_axi_interconnect_wdata_cpu;
-    wire                                w_jesd_axi_interconnect_wlast_cpu;
-    wire                                w_jesd_axi_interconnect_wready_dcif;
-    wire    [3:0]                       w_jesd_axi_interconnect_wstrb_cpu;
-    wire                                w_jesd_axi_interconnect_wvalid_cpu;
+    wire    [31:0]                      w_axi_jesd_araddr;
+    wire    [1:0]                       w_axi_jesd_arburst;
+    wire    [3:0]                       w_axi_jesd_arcache;
+    wire    [7:0]                       w_axi_jesd_arlen;
+    wire    [0:0]                       w_axi_jesd_arlock;
+    wire    [2:0]                       w_axi_jesd_arprot;
+    wire    [3:0]                       w_axi_jesd_arqos;
+    wire                                w_axi_jesd_arready;
+    wire    [3:0]                       w_axi_jesd_arregion;
+    wire    [2:0]                       w_axi_jesd_arsize;
+    wire                                w_axi_jesd_arvalid;
+    wire    [31:0]                      w_axi_jesd_awaddr;
+    wire    [1:0]                       w_axi_jesd_awburst;
+    wire    [3:0]                       w_axi_jesd_awcache;
+    wire    [7:0]                       w_axi_jesd_awlen;
+    wire    [0:0]                       w_axi_jesd_awlock;
+    wire    [2:0]                       w_axi_jesd_awprot;
+    wire    [3:0]                       w_axi_jesd_awqos;
+    wire                                w_axi_jesd_awready;
+    wire    [3:0]                       w_axi_jesd_awregion;
+    wire    [2:0]                       w_axi_jesd_awsize;
+    wire                                w_axi_jesd_awvalid;
+    wire                                w_axi_jesd_bready;
+    wire    [1:0]                       w_axi_jesd_bresp;
+    wire                                w_axi_jesd_bvalid;
+    wire    [31:0]                      w_axi_jesd_rdata;
+    wire                                w_axi_jesd_rlast;
+    wire                                w_axi_jesd_rready;
+    wire    [1:0]                       w_axi_jesd_rresp;
+    wire                                w_axi_jesd_rvalid;
+    wire    [31:0]                      w_axi_jesd_wdata;
+    wire                                w_axi_jesd_wlast;
+    wire                                w_axi_jesd_wready;
+    wire    [3:0]                       w_axi_jesd_wstrb;
+    wire                                w_axi_jesd_wvalid;
 
 
 
@@ -190,10 +200,10 @@ module RU_TOP(
     assign PTP_REF_CLK = MGT_REF_CLK_0;
     assign w_clk_ptp   = PTP_REF_CLK;
 
-    assign w_mac_sys_reset   = 1'b0;
+    assign mac_sys_reset   = 1'b0;
     assign w_fh_qpll_reset   = 1'b0;
 
-    assign w_dma_block_reset = 1'b0;
+    assign dma_block_reset = 1'b0;
     assign w_rx_wdt_reset    = 2'b00;
 
     assign w_ecpri_gt_rxlpmen[0]   = 1'b1;
@@ -205,30 +215,30 @@ module RU_TOP(
     assign w_ecpri_txpostcusor[0]   = 5'd0;
     assign w_ecpri_txpostcusor[1]   = 5'd0;
 
-    assign w_ul_oran_axis_0_tdata  = 64'd0;
-    assign w_ul_oran_axis_0_tkeep  = 8'd0;
-    assign w_ul_oran_axis_0_tlast  = 1'b0;
-    assign w_ul_oran_axis_0_tvalid = 1'b0;
+    assign mac0_tx_data  = 64'd0;
+    assign mac0_tx_keep  = 8'd0;
+    assign mac0_tx_last  = 1'b0;
+    assign mac0_tx_valid = 1'b0;
 
 
 
     mpsoc_ps_system_wrapper RU_MPSoC (
-        .AMC_SPI_io0_io                (FPGA_AMP_AMC_SPI_SDI                ), // output
-        .AMC_SPI_io1_io                (AMP_FPGA_AMC_SPI_SDO                ), // input
-        .AMC_SPI_sck_io                (FPGA_AMP_AMC_SPI_SCLK               ), // output
-        .AMC_SPI_ss_io                 (FPGA_AMP_AMC_SPI_CS_L               ), // output
+        .AMC_SPI_io0_io                (AMC_SPI_SDI                          ), // output
+        .AMC_SPI_io1_io                (AMC_SPI_SDO                          ), // input
+        .AMC_SPI_sck_io                (AMC_SPI_SCLK                         ), // output
+        .AMC_SPI_ss_io                 (AMC_SPI_CS_L                         ), // output
         .CLK_122P88                    (w_clk_sysx4                         ), // input
         .CLK_245P76                    (w_clk_sysx8                         ), // input
         .DACOUT                        (PWM_FROM_FPGA                       ), // output
-        .DL_CU_AXIS_0_tdata            (w_dl_oran_axis_0_tdata              ), // output [63:0]
-        .DL_CU_AXIS_0_tkeep            (w_dl_oran_axis_0_tkeep              ), // output [7:0]
-        .DL_CU_AXIS_0_tlast            (w_dl_oran_axis_0_tlast              ), // output
-        .DL_CU_AXIS_0_tvalid           (w_dl_oran_axis_0_tvalid             ), // output
+        .DL_CU_AXIS_0_tdata            (mac0_rx_data              ), // output [63:0]
+        .DL_CU_AXIS_0_tkeep            (mac0_rx_keep              ), // output [7:0]
+        .DL_CU_AXIS_0_tlast            (mac0_rx_last              ), // output
+        .DL_CU_AXIS_0_tvalid           (mac0_rx_valid             ), // output
         .DL_CU_AXIS_1_tdata            (                                    ), // Not used, // output [63:0]
         .DL_CU_AXIS_1_tkeep            (                                    ), // Not used, // output [7:0]
         .DL_CU_AXIS_1_tlast            (                                    ), // Not used, // output
         .DL_CU_AXIS_1_tvalid           (                                    ), // Not used, // output
-        .DMA_BLOCK_RESET               (w_dma_block_reset                   ), // input
+        .DMA_BLOCK_RESET               (dma_block_reset                   ), // input
         .EMIO_GPIO_0                   (w_emio_gpio                         ), //w_emio_gpio                        ), // output
         .EMIO_WDT1                     (w_emio_wdt1                         ), //w_emio_wdt1                        ), // output
         .FCLK_CLK0                     (w_clk_cpuif                         ), // output
@@ -236,18 +246,18 @@ module RU_TOP(
         .FH_QPLL_LOCK0                 (w_fh_qpll_lock[0]                   ), // output
         .FH_QPLL_LOCK1                 (w_fh_qpll_lock[1]                   ), // output
         .FH_QPLL_RESET                 (w_fh_qpll_reset                     ), // input
-        .FRAME_SYNC                    (w_cpu_frame_sync                    ), // output
-        .GMII_ENET0_col                (1'b0                                ), // input
-        .GMII_ENET0_crs                (1'b0                                ), // input
-        .GMII_ENET0_rx_clk             (1'b0                                ), // input
-        .GMII_ENET0_rx_dv              (1'b0                                ), // input
-        .GMII_ENET0_rx_er              (1'b0                                ), // input
-        .GMII_ENET0_rxd                (w_gmii_enet0_rxd                    ), // input  [7:0]
-        .GMII_ENET0_speed_mode         (w_gmii_enet0_speed_mode             ), // output [2:0]
-        .GMII_ENET0_tx_clk             (1'b0                                ), // input
-        .GMII_ENET0_tx_en              (w_gmii_enet0_tx_en                  ), // output
-        .GMII_ENET0_tx_er              (w_gmii_enet0_tx_er                  ), // output
-        .GMII_ENET0_txd                (w_gmii_enet0_txd                    ), // output [7:0]
+        .FRAME_SYNC                    (frame_sync_cpu_top[0]            ), // output
+        .GMII_ENET0_col                (UDE_ETH_COL                         ), // input
+        .GMII_ENET0_crs                (UDE_ETH_CRS                         ), // input
+        .GMII_ENET0_rx_clk             (UDE_ETH_RXC                         ), // input
+        .GMII_ENET0_rx_dv              (UDE_ETH_RXDV                        ), // input
+        .GMII_ENET0_rx_er              (UDE_ETH_RXER                        ), // input
+        .GMII_ENET0_rxd                ({4'h0, UDE_ETH_RXD}                 ), // input  [7:0]
+        .GMII_ENET0_speed_mode         (                                    ), // output [2:0]
+        .GMII_ENET0_tx_clk             (UDE_ETH_TXC                         ), // input
+        .GMII_ENET0_tx_en              (UDE_ETH_TXEN                        ), // output
+        .GMII_ENET0_tx_er              (                                    ), // output
+        .GMII_ENET0_txd                ({w_dummy_txd, UDE_ETH_TXD}          ), // output [7:0]
         .GSM_SYNC_SEL                  (                                    ), // Not used, output
         .GT_REFCLK                     (MGT_REF_CLK_0                       ), // input
         .GT_RESET_RX_DONE_OUT_0        (w_ecpri_gt_reset_rx_done[0]         ), // output
@@ -262,52 +272,52 @@ module RU_TOP(
         .GT_TX_0_gt_port_0_p           (RU_DU_P[0]                          ), // output
         .GT_TX_1_gt_port_0_n           (RU_DU_N[1]                          ), // output
         .GT_TX_1_gt_port_0_p           (RU_DU_P[1]                          ), // output
-        .JESD_AXI_INTERCONNECT_araddr  (w_jesd_axi_interconnect_araddr_cpu  ), //output [31:0]
-        .JESD_AXI_INTERCONNECT_arburst (w_jesd_axi_interconnect_arburst_cpu ), //output [1:0]
-        .JESD_AXI_INTERCONNECT_arcache (w_jesd_axi_interconnect_arcache_cpu ), //output [3:0]
-        .JESD_AXI_INTERCONNECT_arlen   (w_jesd_axi_interconnect_arlen_cpu   ), //output [7:0]
-        .JESD_AXI_INTERCONNECT_arlock  (w_jesd_axi_interconnect_arlock_cpu  ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_arprot  (w_jesd_axi_interconnect_arprot_cpu  ), //output [2:0]
-        .JESD_AXI_INTERCONNECT_arqos   (w_jesd_axi_interconnect_arqos_cpu   ), //output [3:0]
-        .JESD_AXI_INTERCONNECT_arready (w_jesd_axi_interconnect_arready_dcif), //input  [0:0]
-        .JESD_AXI_INTERCONNECT_arregion(w_jesd_axi_interconnect_arregion_cpu), //output [3:0]
-        .JESD_AXI_INTERCONNECT_arsize  (w_jesd_axi_interconnect_arsize_cpu  ), //output [2:0]
-        .JESD_AXI_INTERCONNECT_arvalid (w_jesd_axi_interconnect_arvalid_cpu ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_awaddr  (w_jesd_axi_interconnect_awaddr_cpu  ), //output [31:0]
-        .JESD_AXI_INTERCONNECT_awburst (w_jesd_axi_interconnect_awburst_cpu ), //output [1:0]
-        .JESD_AXI_INTERCONNECT_awcache (w_jesd_axi_interconnect_awcache_cpu ), //output [3:0]
-        .JESD_AXI_INTERCONNECT_awlen   (w_jesd_axi_interconnect_awlen_cpu   ), //output [7:0]
-        .JESD_AXI_INTERCONNECT_awlock  (w_jesd_axi_interconnect_awlock_cpu  ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_awprot  (w_jesd_axi_interconnect_awprot_cpu  ), //output [2:0]
-        .JESD_AXI_INTERCONNECT_awqos   (w_jesd_axi_interconnect_awqos_cpu   ), //output [3:0]
-        .JESD_AXI_INTERCONNECT_awready (w_jesd_axi_interconnect_awready_dcif), //input  [0:0]
-        .JESD_AXI_INTERCONNECT_awregion(w_jesd_axi_interconnect_awregion_cpu), //output [3:0]
-        .JESD_AXI_INTERCONNECT_awsize  (w_jesd_axi_interconnect_awsize_cpu  ), //output [2:0]
-        .JESD_AXI_INTERCONNECT_awvalid (w_jesd_axi_interconnect_awvalid_cpu ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_bready  (w_jesd_axi_interconnect_bready_cpu  ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_bresp   (w_jesd_axi_interconnect_bresp_dcif  ), //input  [1:0]
-        .JESD_AXI_INTERCONNECT_bvalid  (w_jesd_axi_interconnect_bvalid_dcif ), //input  [0:0]
-        .JESD_AXI_INTERCONNECT_rdata   (w_jesd_axi_interconnect_rdata_dcif  ), //input  [31:0]
-        .JESD_AXI_INTERCONNECT_rlast   (w_jesd_axi_interconnect_rlast_dcif  ), //input  [0:0]
-        .JESD_AXI_INTERCONNECT_rready  (w_jesd_axi_interconnect_rready_cpu  ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_rresp   (w_jesd_axi_interconnect_rresp_dcif  ), //input  [1:0]
-        .JESD_AXI_INTERCONNECT_rvalid  (w_jesd_axi_interconnect_rvalid_dcif ), //input  [0:0]
-        .JESD_AXI_INTERCONNECT_wdata   (w_jesd_axi_interconnect_wdata_cpu   ), //output [31:0]
-        .JESD_AXI_INTERCONNECT_wlast   (w_jesd_axi_interconnect_wlast_cpu   ), //output [0:0]
-        .JESD_AXI_INTERCONNECT_wready  (w_jesd_axi_interconnect_wready_dcif ), //input  [0:0]
-        .JESD_AXI_INTERCONNECT_wstrb   (w_jesd_axi_interconnect_wstrb_cpu   ), //output [3:0]
-        .JESD_AXI_INTERCONNECT_wvalid  (w_jesd_axi_interconnect_wvalid_cpu  ), //output [0:0]
-        .L0_DEFRAMER_CLK               (w_l0_deframer_clk                   ), // output
-        .L1_DEFRAMER_CLK               (w_l1_deframer_clk                   ), // output
-        .MAC_SYS_RESET                 (w_mac_sys_reset                     ), // input
-        .MDIO_ENET0_mdc                (w_mdio_enet0_mdc                    ), // output
-        .MDIO_ENET0_mdio_io            (w_mdio_enet0_mdio_io                ), // inout
+        .JESD_AXI_INTERCONNECT_araddr  (w_axi_jesd_araddr  ), //output [31:0]
+        .JESD_AXI_INTERCONNECT_arburst (w_axi_jesd_arburst ), //output [1:0]
+        .JESD_AXI_INTERCONNECT_arcache (w_axi_jesd_arcache ), //output [3:0]
+        .JESD_AXI_INTERCONNECT_arlen   (w_axi_jesd_arlen   ), //output [7:0]
+        .JESD_AXI_INTERCONNECT_arlock  (w_axi_jesd_arlock  ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_arprot  (w_axi_jesd_arprot  ), //output [2:0]
+        .JESD_AXI_INTERCONNECT_arqos   (w_axi_jesd_arqos   ), //output [3:0]
+        .JESD_AXI_INTERCONNECT_arready (w_axi_jesd_arready), //input  [0:0]
+        .JESD_AXI_INTERCONNECT_arregion(w_axi_jesd_arregion), //output [3:0]
+        .JESD_AXI_INTERCONNECT_arsize  (w_axi_jesd_arsize  ), //output [2:0]
+        .JESD_AXI_INTERCONNECT_arvalid (w_axi_jesd_arvalid ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_awaddr  (w_axi_jesd_awaddr  ), //output [31:0]
+        .JESD_AXI_INTERCONNECT_awburst (w_axi_jesd_awburst ), //output [1:0]
+        .JESD_AXI_INTERCONNECT_awcache (w_axi_jesd_awcache ), //output [3:0]
+        .JESD_AXI_INTERCONNECT_awlen   (w_axi_jesd_awlen   ), //output [7:0]
+        .JESD_AXI_INTERCONNECT_awlock  (w_axi_jesd_awlock  ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_awprot  (w_axi_jesd_awprot  ), //output [2:0]
+        .JESD_AXI_INTERCONNECT_awqos   (w_axi_jesd_awqos   ), //output [3:0]
+        .JESD_AXI_INTERCONNECT_awready (w_axi_jesd_awready), //input  [0:0]
+        .JESD_AXI_INTERCONNECT_awregion(w_axi_jesd_awregion), //output [3:0]
+        .JESD_AXI_INTERCONNECT_awsize  (w_axi_jesd_awsize  ), //output [2:0]
+        .JESD_AXI_INTERCONNECT_awvalid (w_axi_jesd_awvalid ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_bready  (w_axi_jesd_bready  ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_bresp   (w_axi_jesd_bresp  ), //input  [1:0]
+        .JESD_AXI_INTERCONNECT_bvalid  (w_axi_jesd_bvalid ), //input  [0:0]
+        .JESD_AXI_INTERCONNECT_rdata   (w_axi_jesd_rdata  ), //input  [31:0]
+        .JESD_AXI_INTERCONNECT_rlast   (w_axi_jesd_rlast  ), //input  [0:0]
+        .JESD_AXI_INTERCONNECT_rready  (w_axi_jesd_rready  ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_rresp   (w_axi_jesd_rresp  ), //input  [1:0]
+        .JESD_AXI_INTERCONNECT_rvalid  (w_axi_jesd_rvalid ), //input  [0:0]
+        .JESD_AXI_INTERCONNECT_wdata   (w_axi_jesd_wdata   ), //output [31:0]
+        .JESD_AXI_INTERCONNECT_wlast   (w_axi_jesd_wlast   ), //output [0:0]
+        .JESD_AXI_INTERCONNECT_wready  (w_axi_jesd_wready ), //input  [0:0]
+        .JESD_AXI_INTERCONNECT_wstrb   (w_axi_jesd_wstrb   ), //output [3:0]
+        .JESD_AXI_INTERCONNECT_wvalid  (w_axi_jesd_wvalid  ), //output [0:0]
+        .L0_DEFRAMER_CLK               (l0_deframer_clk                   ), // output
+        .L1_DEFRAMER_CLK               (l1_deframer_clk                   ), // output
+        .MAC_SYS_RESET                 (mac_sys_reset                     ), // input
+        .MDIO_ENET0_mdc                (UDE_ETH_MDC                         ), // output
+        .MDIO_ENET0_mdio_io            (UDE_ETH_MDIO                        ), // inout
         .MODE_CHANGE_10G_25G_0         (1'b0                                ), // input
         .MODE_CHANGE_10G_25G_1         (1'b0                                ), // Not Used, input
         .PDM_TEST_EN                   (1'b0                                ), // Not Used, input
         .PLL_100to250_locked           (                                    ),  // output
         .PLL_122p88to100_locked        (                                    ), // output
-        .PTP_1PPS                      (w_ptp_1pps                          ), // output
+        .PTP_1PPS                      (ptp_1pps_cpu_top                          ), // output
         .PTP_EVEN                      (                                    ), // output
         .PTP_MMCM_CLK                  (w_clk_ptp                           ), // input
         .RESET_MMCM_250M               (1'b0                                ), // input
@@ -333,13 +343,13 @@ module RU_TOP(
         .UART_OOK_1_txd                (w_uart_ook1_txd                     ),  //  output   
         .UART_RET_rxd                  (w_uart_ret_rxd                      ), // input
         .UART_RET_txd                  (w_uart_ret_txd                      ), // output
-        .UART_RFIC_rxd                 (RFIC_UART_OUT                       ),  //  input  
-        .UART_RFIC_txd                 (RFIC_UART_IN                        ),  //  output
-        .UL_UL_AXIS_0_tdata            (w_ul_oran_axis_0_tdata              ), // input [63:0]
-        .UL_UL_AXIS_0_tkeep            (w_ul_oran_axis_0_tkeep              ), // input [7:0]
-        .UL_UL_AXIS_0_tlast            (w_ul_oran_axis_0_tlast              ), // input
-        .UL_UL_AXIS_0_tready           (w_ul_oran_axis_0_tready             ), // output
-        .UL_UL_AXIS_0_tvalid           (w_ul_oran_axis_0_tvalid             ), // input
+        .UART_RFIC_rxd                 (RFIC_UART_IN                        ),  //  input  
+        .UART_RFIC_txd                 (RFIC_UART_OUT                       ),  //  output
+        .UL_UL_AXIS_0_tdata            (mac0_tx_data              ), // input [63:0]
+        .UL_UL_AXIS_0_tkeep            (mac0_tx_keep              ), // input [7:0]
+        .UL_UL_AXIS_0_tlast            (mac0_tx_last              ), // input
+        .UL_UL_AXIS_0_tready           (mac0_tx_ready             ), // output
+        .UL_UL_AXIS_0_tvalid           (mac0_tx_valid             ), // input
         .UL_UP_AXIS_1_tdata            (64'h0                               ), // Not Used, input  [63:0]
         .UL_UP_AXIS_1_tkeep            (8'h0                                ), // Not Used, input  [7:0]
         .UL_UP_AXIS_1_tlast            (1'b0                                ), // Not Used, input
