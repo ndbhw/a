@@ -1,0 +1,126 @@
+--================================================================================
+-- Filename     : SYNC_GEN.vhd
+-- Author       : Taeyoup Kim (taeyoup.kim@samsung.com)
+-- Description  : Based on SCS and adjust value, advanced/retarded sync generation
+----------------------------------------------------------------------------------
+--     Date    |     By           |  Version | Description
+----------------------------------------------------------------------------------
+--  08-07-2020 | Taeyoup Kim      |    1.0   | Original Version
+--================================================================================
+-- Copyright (c) 2020 SAMSUNG. All rights reserved.
+--================================================================================
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+
+
+    entity SYNC_GEN is
+    generic (
+    SCS                         : natural := 15
+    );
+    port (
+    I_CLK                       : in  std_logic;
+    I_NFFT                      : in  std_logic_vector( 1 downto 0);
+    I_RETARD                    : in  std_logic_vector(21 downto 0);
+    I_FRAME_SYNC                : in  std_logic;
+    I_EN                        : in  std_logic;
+    O_FRAME_SYNC                : out std_logic;
+    O_SUBFRM_SYNC               : out std_logic;
+    O_SLOT_SYNC                 : out std_logic;
+    O_SYMBOL_SYNC               : out std_logic;
+    O_SYMBOL_CH_SYNC            : out std_logic;
+    O_SUBFRAME                  : out std_logic_vector( 3 downto 0);
+    O_SLOT                      : out std_logic_vector( 7 downto 0);
+    O_SYMBOL                    : out std_logic_vector( 3 downto 0)
+    );
+    end SYNC_GEN;
+
+
+architecture BEHAVE of SYNC_GEN is
+
+    component REF_SYNC_GEN_15kHz is
+    port (
+    I_CLK                       : in  std_logic;
+    I_NFFT                      : in  std_logic_vector( 1 downto 0);
+    I_RETARD                    : in  std_logic_vector(21 downto 0);
+    I_FRAME_SYNC                : in  std_logic;
+    I_EN                        : in  std_logic;
+    O_FRAME_SYNC                : out std_logic;
+    O_SUBFRM_SYNC               : out std_logic;
+    O_SLOT_SYNC                 : out std_logic;
+    O_SYMBOL_SYNC               : out std_logic;
+    O_SYMBOL_CH_SYNC            : out std_logic;
+    O_SLOT                      : out std_logic_vector( 7 downto 0);
+    O_SYMBOL                    : out std_logic_vector( 3 downto 0)
+    );
+    end component;
+
+    component REF_SYNC_GEN_30kHz is
+    port (
+    I_CLK                       : in  std_logic;
+    I_RETARD                    : in  std_logic_vector(21 downto 0);
+    I_FRAME_SYNC                : in  std_logic;
+    I_EN                        : in  std_logic;
+    O_FRAME_SYNC                : out std_logic;
+    O_SUBFRM_SYNC               : out std_logic;
+    O_SLOT_SYNC                 : out std_logic;
+    O_SYMBOL_SYNC               : out std_logic;
+    O_SYMBOL_CH_SYNC            : out std_logic;
+    O_SUBFRAME                  : out std_logic_vector( 3 downto 0);
+    O_SLOT                      : out std_logic_vector( 7 downto 0);
+    O_SYMBOL                    : out std_logic_vector( 3 downto 0)
+    );
+    end component;
+
+    signal slot_idx             : std_logic_vector(7 downto 0) := (others => '0');
+ 	signal scs15k_subframe_s : std_logic_vector( 7 downto 0);
+
+begin
+
+    u_SCS_15_kHz : if SCS = 15 generate
+
+    SYNC_GEN_15kHz : REF_SYNC_GEN_15kHz
+    port map(
+    I_CLK                       => I_CLK,
+    I_NFFT                      => I_NFFT,
+    I_RETARD                    => I_RETARD,
+    I_FRAME_SYNC                => I_FRAME_SYNC,
+    I_EN                        => I_EN,
+    O_FRAME_SYNC                => O_FRAME_SYNC,
+    O_SUBFRM_SYNC               => O_SUBFRM_SYNC,
+    O_SLOT_SYNC                 => O_SLOT_SYNC,
+    O_SYMBOL_SYNC               => O_SYMBOL_SYNC,
+    O_SYMBOL_CH_SYNC            => O_SYMBOL_CH_SYNC,
+--    O_SLOT                      => scs15k_subframe_s, --slot_idx,
+    O_SLOT                      => slot_idx,
+    O_SYMBOL                    => O_SYMBOL
+    );
+
+    O_SLOT     <= slot_idx;
+    O_SUBFRAME <= slot_idx(3 downto 0);
+
+    end generate;
+
+    u_SCS_30_kHz : if SCS = 30 generate
+
+    SYNC_GEN_30kHz : REF_SYNC_GEN_30kHz
+    port map(
+    I_CLK                       => I_CLK,
+    I_RETARD                    => I_RETARD,
+    I_FRAME_SYNC                => I_FRAME_SYNC,
+    I_EN                        => I_EN,
+    O_FRAME_SYNC                => O_FRAME_SYNC,
+    O_SUBFRM_SYNC               => O_SUBFRM_SYNC,
+    O_SLOT_SYNC                 => O_SLOT_SYNC,
+    O_SYMBOL_SYNC               => O_SYMBOL_SYNC,
+    O_SYMBOL_CH_SYNC            => O_SYMBOL_CH_SYNC,
+    O_SUBFRAME                  => O_SUBFRAME,
+    O_SLOT                      => O_SLOT,
+    O_SYMBOL                    => O_SYMBOL
+    );
+
+    end generate;
+
+end BEHAVE;
+

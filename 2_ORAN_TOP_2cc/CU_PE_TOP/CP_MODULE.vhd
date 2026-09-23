@@ -1,0 +1,1234 @@
+
+--================================================================================
+-- Filename     : CP_MODULE.vhd
+-- Author       : Taeyoup Kim (taeyoup.kim@samsung.com)
+-- Description  : O-RAN C-Plane (DL/UL) Parameter Parsing and Rx window management
+----------------------------------------------------------------------------------
+--     Date    |     By           |  Version | Description
+----------------------------------------------------------------------------------
+--  08-07-2020 | Taeyoup Kim      |    1.0   | Original Version
+--================================================================================
+-- Copyright (c) 2020 SAMSUNG. All rights reserved.
+--================================================================================
+
+library IEEE;
+use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.STD_LOGIC_UNSIGNED.ALL;
+use IEEE.STD_LOGIC_ARITH.ALL;
+use IEEE.NUMERIC_STD.ALL;
+use IEEE.MATH_REAL.ALL;
+
+
+    entity CP_MODULE is
+    generic (
+    VENDOR                         : string  := "XILINX";
+    Category                       : string  :=      "B";
+    ADD_LATENCY                    : natural :=        4; -- available for XILINX
+    iFFT_k0_SHIFT                  : boolean :=     TRUE;
+    iFFT_ZERO_PADDING              : boolean :=    FALSE;
+    SCS                            : natural :=       30;
+    SECTION_NUM                    : natural :=      256;
+    Max_RB_NUM                     : natural :=      273;
+    iFFT_WIDTH                     : natural :=       12;
+    CH_NUM                         : natural :=        2; -- Layer/Path @ module
+    DL_LAYER_NUM                   : natural :=        4;
+    UL_RX_NUM                      : natural :=        8;
+    CELL_NUM_eMTC                  : natural :=        1;
+    PATH_NUM                       : natural :=        4; -- Layer/Path @ cell
+    Opt_BF_Support                 : natural :=        1  -- Mandatory: 0, Optional: 1
+    );
+    port (
+
+    CLK                            : in std_logic;
+    BW_iFFT_WIDTH                  : in natural range 0 to 12;
+    RB_SIZE                        : in natural range 0 to 273;
+    RE_SIZE                        : in natural range 0 to 3276;
+
+    TDD_DL_EN                      : in std_logic_vector((Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM)*01 - 1 downto 0);
+
+    UP_ONLY_DL_MODE                : in std_logic;
+
+    --------------------------------------------------------------------------------
+    -- CP_PARSER
+    --------------------------------------------------------------------------------
+
+    CP_UPDATE                      : in std_logic;
+    CP_CH_IDX                      : in std_logic_vector(  3 downto 0);
+    CP_PARAMETER                   : in std_logic_vector(191+(15*3)+6+16 downto 0);
+
+    --------------------------------------------------------------------------------
+    -- DL Sync Advance / UL Sync Retard
+    --------------------------------------------------------------------------------
+
+    DL_ADV_SBF_SYNC                : in std_logic;
+    DL_ADV_SLOT_SYNC               : in std_logic;
+    DL_ADV_SLOT_IDX                : in std_logic_vector(  7 downto 0); -- SCS 15kHz : 0 ~ 9 (per Frame)
+    DL_ADV_SYMBOL_SYNC             : in std_logic;
+    DL_ADV_SYMBOL_CH_SYNC          : in  std_logic;
+    DL_ADV_SYMBOL_IDX              : in std_logic_vector(  3 downto 0); -- 0~13
+
+    UL_RTD_SBF_SYNC                : in std_logic;
+    UL_RTD_SBF_IDX                 : in std_logic_vector(  3 downto 0); -- 0~9
+    UL_RTD_SLOT_SYNC               : in std_logic;
+    UL_RTD_SLOT_IDX                : in std_logic_vector(  7 downto 0); -- SCS 15kHz : 0 ~ 9 (per Frame)
+    UL_RTD_SYMBOL_SYNC             : in std_logic;
+    UL_RTD_SYMBOL_IDX              : in std_logic_vector(  3 downto 0); -- 0~13
+
+    --------------------------------------------------------------------------------
+    -- DLFE/ULFE/RAFE
+    --------------------------------------------------------------------------------
+
+    SYSTEM_MODE                    : in  std_logic;                      -- 0: LTE, 1: NR
+    K0                             : in  std_logic_vector( 11 downto 0);
+    DL_FRAME_INDEX                 : out std_logic_vector(  7 downto 0);
+    DL_FRAME_STRUCTURE             : out std_logic_vector(  7 downto 0);
+    DL_MuSu_nLayer                 : out std_logic_vector(  4 downto 0); -- just for Optional BF
+    DL_VALID                       : out std_logic_vector((Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM)*01 - 1 downto 0);
+    DL_RE_MASK                     : out std_logic_vector((Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM)*01 - 1 downto 0);
+    DL_BEAMID                      : out std_logic_vector((Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM)*15 - 1 downto 0);
+
+    UL_FILTER_INDEX                : out std_logic_vector( 4*CH_NUM-1 downto 0); -- 2T2R 1CC
+    UL_TIME_OFFSET                 : out std_logic_vector(16*CH_NUM-1 downto 0);
+    UL_FRAME_STRUCTURE             : out std_logic_vector( 8*CH_NUM-1 downto 0);
+    UL_CPLENGTH                    : out std_logic_vector(16*CH_NUM-1 downto 0);
+    UL_FREQ_OFFSET                 : out std_logic_vector(24*CH_NUM-1 downto 0);
+    UL_START_PRBC                  : out std_logic_vector(10*CH_NUM-1 downto 0);
+    UL_NUM_PRBC                    : out std_logic_vector( 8*CH_NUM-1 downto 0);
+    UL_NUM_PSYMBOL                 : out std_logic_vector( 4*CH_NUM-1 downto 0);
+    UL_NUM_RO                      : out std_logic_vector( 3*CH_NUM-1 downto 0)
+
+--    UL_eMTC_FILTER_INDEX           : out std_logic_vector( 4*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_TIME_OFFSET            : out std_logic_vector(16*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_FRAME_STRUCTURE        : out std_logic_vector( 8*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_CPLENGTH               : out std_logic_vector(16*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_FREQ_OFFSET            : out std_logic_vector(24*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_START_PRBC             : out std_logic_vector(10*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_NUM_PRBC               : out std_logic_vector( 8*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_NUM_PSYMBOL            : out std_logic_vector( 4*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+--    UL_eMTC_NUM_RO                 : out std_logic_vector( 3*CELL_NUM_eMTC*PATH_NUM-1 downto 0);
+
+    );
+    end CP_MODULE;
+
+architecture BEHAVE of CP_MODULE is
+
+    component CP_MEMORY is
+    generic(
+    VENDOR                         : string  := "XILINX";
+    ADDR_WIDTH                     : natural := 9;
+    DATA_WIDTH                     : natural := 40
+    );
+    port(
+    CLK                            : in  std_logic;
+    WEA                            : in  std_logic;
+    ENA                            : in  std_logic;
+    ENB                            : in  std_logic;
+    ADDRA                          : in  std_logic_vector(ADDR_WIDTH - 1 downto 0);
+    ADDRB                          : in  std_logic_vector(ADDR_WIDTH - 1 downto 0);
+    DIA                            : in  std_logic_vector(DATA_WIDTH - 1 downto 0);
+    DOB                            : out std_logic_vector(DATA_WIDTH - 1 downto 0)
+    );
+    end component;
+
+    component RA_MODULE is
+    generic (
+    PATH_NUM                       : natural := 4
+    );
+    port (
+
+    CLK                            : in std_logic;
+
+    --------------------------------------------------------------------------------
+    -- CP_PARSER
+    --------------------------------------------------------------------------------
+
+    MODULE_EN                      : in std_logic;
+    CP_UPDATE                      : in std_logic;
+    CP_CH_IDX                      : in std_logic_vector(  3 downto 0);
+    NUM_PORTC                      : in std_logic_vector(  5 downto 0);
+    DATA_DIRECTION                 : in std_logic;
+    FILTER_INDEX                   : in std_logic_vector(  3 downto 0);
+    SUBFRAME_ID                    : in std_logic_vector(  3 downto 0);
+    SLOT_ID                        : in std_logic_vector(  5 downto 0);
+    START_SYMBOL_ID                : in std_logic_vector(  5 downto 0);
+    SECTION_TYPE                   : in std_logic_vector(  7 downto 0);
+    TIME_OFFSET                    : in std_logic_vector( 15 downto 0);
+    FRAME_STRUCTURE                : in std_logic_vector(  7 downto 0);
+    CPLENGTH                       : in std_logic_vector( 15 downto 0);
+    FREQ_OFFSET                    : in std_logic_vector( 23 downto 0);
+    START_PRBC                     : in std_logic_vector(  9 downto 0);
+    NUM_PRBC                       : in std_logic_vector(  7 downto 0);
+    NUM_SYMBOL                     : in std_logic_vector(  3 downto 0);
+
+    --------------------------------------------------------------------------------
+    -- UL Sync Retard
+    --------------------------------------------------------------------------------
+
+    UL_RTD_SBF_SYNC                : in std_logic;
+    UL_RTD_SBF_IDX                 : in std_logic_vector(  3 downto 0); -- 0~9
+    UL_RTD_SLOT_SYNC               : in std_logic;
+    UL_RTD_SLOT_IDX                : in std_logic_vector(  7 downto 0); -- SCS 15kHz : 0 ~ 9 (per Frame)
+    UL_RTD_SYMBOL_SYNC             : in std_logic;
+    UL_RTD_SYMBOL_IDX              : in std_logic_vector(  3 downto 0); -- 0~13
+
+    --------------------------------------------------------------------------------
+    -- RAFE
+    --------------------------------------------------------------------------------
+
+    UL_FILTER_INDEX                : out std_logic_vector(PATH_NUM*4-1 downto 0);
+    UL_TIME_OFFSET                 : out std_logic_vector(PATH_NUM*16-1 downto 0);
+    UL_FRAME_STRUCTURE             : out std_logic_vector(PATH_NUM*8-1 downto 0);
+    UL_CPLENGTH                    : out std_logic_vector(PATH_NUM*16-1 downto 0);
+    UL_FREQ_OFFSET                 : out std_logic_vector(PATH_NUM*24-1 downto 0);
+    UL_START_PRBC                  : out std_logic_vector(PATH_NUM*10-1 downto 0);
+    UL_NUM_PRBC                    : out std_logic_vector(PATH_NUM*8-1 downto 0);
+    UL_NUM_PSYMBOL                 : out std_logic_vector(PATH_NUM*4-1 downto 0);
+    UL_NUM_RO                      : out std_logic_vector(PATH_NUM*3-1 downto 0)
+    );
+    end component;
+
+    type std_logic_array2  is array(natural range <>) of std_logic_vector( 1 downto 0);
+    type std_logic_array3  is array(natural range <>) of std_logic_vector( 2 downto 0);
+    type std_logic_array4  is array(natural range <>) of std_logic_vector( 3 downto 0);
+    type std_logic_array6  is array(natural range <>) of std_logic_vector( 5 downto 0);
+    type std_logic_array8  is array(natural range <>) of std_logic_vector( 7 downto 0);
+    type std_logic_array10 is array(natural range <>) of std_logic_vector( 9 downto 0);
+    type std_logic_array15 is array(natural range <>) of std_logic_vector(14 downto 0);
+    type std_logic_array16 is array(natural range <>) of std_logic_vector(15 downto 0);
+    type std_logic_array24 is array(natural range <>) of std_logic_vector(23 downto 0);
+
+    constant CH_NUM_WIDTH          : positive  := positive(ceil(log2(real(CH_NUM))));
+    constant SECTION_NUM_WIDTH     : positive  := positive(ceil(log2(real(SECTION_NUM))));
+    constant ADDR_WIDTH            : positive  := positive(SECTION_NUM_WIDTH + CH_NUM_WIDTH*(1 - Opt_BF_Support) + 1);
+-- 211223_EXT10    constant ADDR_WIDTH            : positive  := positive(SECTION_NUM_WIDTH + CH_NUM_WIDTH*(1 - Opt_BF_Support) + 1 - 1); -- 8 -> 4 Path Reduction @ 2T2R Section EXT=10, 8 -> 2 Path Reduction @ 4T4R Section EXT=10
+    constant DATA_WIDTH            : positive  := positive(40 + (15*4)*Opt_BF_Support);
+
+    signal dl_mem_clr_ch_cnt       : std_logic_vector(CH_NUM_WIDTH - 1 downto 0) := (others => '0');
+    signal dl_cp_ch_idx_ext10      : std_logic_vector(CH_NUM_WIDTH - 1 downto 0) := (others => '0');
+    signal dl_rd_ch_idx            : std_logic_vector(CH_NUM_WIDTH - 1 downto 0) := (others => '0');
+    signal dl_rd_ch_idx_ext10      : std_logic_vector(CH_NUM_WIDTH - 1 downto 0) := (others => '0');
+    signal dl_next_ch_idx          : std_logic_vector(CH_NUM_WIDTH - 1 downto 0) := (others => '0');
+    signal dl_next_ch_idx_ext10    : std_logic_vector(CH_NUM_WIDTH - 1 downto 0) := (others => '0');
+
+    signal data_direction          : std_logic := '0';
+    signal filter_index            : std_logic_vector(  3 downto 0) := (others => '0');
+    signal frame_id                : std_logic_vector(  7 downto 0) := (others => '0');
+    signal subframe_id             : std_logic_vector(  3 downto 0) := (others => '0');
+    signal slot_id                 : std_logic_vector(  5 downto 0) := (others => '0');
+    signal start_symbol_id         : std_logic_vector(  5 downto 0) := (others => '0');
+    signal num_section             : std_logic_vector(  7 downto 0) := (others => '0');
+    signal section_cnt             : std_logic_vector(  7 downto 0) := (others => '0');
+    signal section_type            : std_logic_vector(  7 downto 0) := (others => '0');
+    signal time_offset             : std_logic_vector( 15 downto 0) := (others => '0');
+    signal frame_structure         : std_logic_vector(  7 downto 0) := (others => '0');
+    signal cpLength                : std_logic_vector( 15 downto 0) := (others => '0');
+    signal section_id              : std_logic_vector( 11 downto 0) := (others => '0');
+    signal rb                      : std_logic := '0';
+    signal symInc                  : std_logic := '0';
+    signal start_prbc              : std_logic_vector(  9 downto 0) := (others => '0');
+    signal num_prbc                : std_logic_vector(  7 downto 0) := (others => '0');
+    signal re_mask                 : std_logic_vector( 11 downto 0) := (others => '0');
+    signal num_symbol              : std_logic_vector(  3 downto 0) := (others => '0');
+    signal ef                      : std_logic := '0';
+    signal beamId                  : std_logic_vector( 14 downto 0) := (others => '0');
+    signal freq_offset             : std_logic_vector( 23 downto 0) := (others => '0');
+
+    signal ena                     : std_logic_vector(  1 downto 0) := (others => '0');
+    signal enb                     : std_logic_vector(  1 downto 0) := (others => '0');
+
+    signal addra_dl                : std_logic_vector(SECTION_NUM_WIDTH + CH_NUM_WIDTH downto 0) := (others => '0');
+    signal addrb_dl                : std_logic_vector(SECTION_NUM_WIDTH + CH_NUM_WIDTH downto 0) := (others => '0');
+    signal addrb_dl_d1             : std_logic_vector(SECTION_NUM_WIDTH + CH_NUM_WIDTH downto 0) := (others => '0');
+    signal addrb_dl_d2             : std_logic_vector(SECTION_NUM_WIDTH + CH_NUM_WIDTH downto 0) := (others => '0');
+    signal addrb_dl_d3             : std_logic_vector(SECTION_NUM_WIDTH + CH_NUM_WIDTH downto 0) := (others => '0');
+    signal dina_dl                 : std_logic_vector( 39+(15*4) downto 0) := (others => '0');
+    signal doutb_dl                : std_logic_vector( 39+(15*4) downto 0) := (others => '0');
+    signal doutb_dl_d              : std_logic_vector( 39+(15*4) downto 0) := (others => '0');
+
+    signal dl_mem_clr_en           : std_logic := '0';
+    signal dl_mem_clr_cnt          : std_logic_vector(SECTION_NUM_WIDTH - 1 downto 0) := (others => '0');
+
+    signal i_dl_valid              : std_logic := '0';
+    signal i_dl_adv_symbol_sync    : std_logic := '0';
+    signal dl_adv_symbol_sync_d    : std_logic_vector( 15 downto 0) := (others => '0');
+    signal ul_rtd_symbol_sync_d    : std_logic_vector(  1 downto 0) := (others => '0');
+
+    signal i_k0                    : natural range 0 to 2047 := 0;
+    signal i_re_shift              : natural range 0 to 11 := 0;
+    signal i_re_mask               : std_logic_vector( 11 downto 0) := (others => '0');
+    signal u_SCS                   : std_logic_vector(  3 downto 0) := (others => '0');
+
+    type   std_logic_array_section is array(natural range <>) of std_logic_vector(SECTION_NUM_WIDTH - 1 downto 0);
+    signal slot0_dl_section_cnt    : std_logic_array_section(CH_NUM-1 downto 0) := (others => (others => '0'));
+    signal slot1_dl_section_cnt    : std_logic_array_section(CH_NUM-1 downto 0) := (others => (others => '0'));
+
+    signal dl_slot_index           : std_logic := '0';
+    signal dl_rd_ch_sync           : std_logic := '0';
+    signal dl_rd_ch_sync_d         : std_logic_vector(  1 downto 0) := (others => '0');
+    signal dl_rd_en                : std_logic := '0';
+    signal dl_rd_en_d              : std_logic_vector(  1 downto 0) := (others => '0');
+    signal dl_section_map_start    : std_logic := '0';
+    signal dl_section_map_en       : std_logic := '0';
+    signal dl_section_map_en_d     : std_logic_vector(  2 downto 0) := (others => '0');
+    -- 0 ~ Max_RB_NUM - 1 : for Signal, Max_RB_NUM : for Zero Padding of iFFTshift
+    signal dl_section_map          : std_logic_array_section(Max_RB_NUM downto 0) := (others => (others => '1'));
+    signal dl_section_cnt          : std_logic_vector(SECTION_NUM_WIDTH + CH_NUM_WIDTH downto 0) := (others => '0');
+    signal dl_section_index        : std_logic_vector(SECTION_NUM_WIDTH - 1 downto 0) := (others => '0');
+
+    signal dl_rd_re_cnt            : natural range 0 to         11 := 0;
+    signal dl_rd_rb_cnt            : natural range 0 to Max_RB_NUM := 0;
+    signal dl_start_symbol         : std_logic_vector(  3 downto 0) := (others => '0');
+    signal dl_num_symbol           : std_logic_vector(  3 downto 0) := (others => '0');
+    signal dl_end_symbol           : std_logic_vector(  3 downto 0) := (others => '0');
+    signal dl_next_symbol_idx      : std_logic_vector(  3 downto 0) := (others => '0');
+    signal dl_start_prbc           : std_logic_vector(  8 downto 0) := (others => '0');
+    signal dl_num_prbc             : std_logic_vector(  8 downto 0) := (others => '0');
+    signal dl_end_prbc             : std_logic_vector(  8 downto 0) := (others => '0');
+    signal dl_section_valid        : std_logic := '0';
+    signal dl_rb_valid             : std_logic_vector(Max_RB_NUM downto 0) := (others => '0');
+
+    signal i_zeros                 : std_logic_vector(31 downto 0) := (others => '0');
+
+    -- just for simulation
+    signal i_dl_valid_d            : std_logic := '0';
+    signal i_dl_beamid             : std_logic_array15((Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM)*01 - 1 downto 0) := (others => (others => '0'));
+
+    signal iFFT_shift              : std_logic_vector(iFFT_WIDTH - 1 downto 0) := (others => '0');
+    signal i_rd_cnt                : std_logic_vector(iFFT_WIDTH - 1 downto 0) := (others => '0');
+    signal i_rd_cnt_complete       : natural range 0 to 4095 := 0;
+    signal i_rd_cnt_max_value      : natural range 0 to 2**(iFFT_WIDTH) - 1 := 0;
+    signal dl_adv_symbol_ch_sync_d : std_logic_vector(15 downto 0) := (others => '0');
+
+    signal beamId_group            : std_logic_vector(15*3-1 downto 0) := (others => '0');
+    signal numPortc                : std_logic_vector(     5 downto 0) := (others => '0');
+
+    signal prach_enable            : std_logic := '0';
+
+    signal ext10_en                : std_logic := '0';
+    signal sector_mode_en          : std_logic := '0';
+    signal slot0_rb_indicator      : std_logic := '0';
+    signal slot1_rb_indicator      : std_logic := '0';
+    signal rb_indicator            : std_logic := '0';
+
+    signal rach_section_valid      : std_logic := '0';
+    signal rach_cp_valid           : std_logic_vector(  3 downto 0) := (others => '0');
+    signal rach_band               : std_logic_array2(  3 downto 0) := (others => (others => '0'));
+    signal band_freq_offset        : std_logic_vector( 23 downto 0) := (others => '1');
+    signal band_start_prbc         : std_logic_vector(  9 downto 0) := (others => '1');
+    signal new_band_detect_b0      : std_logic_vector(  3 downto 0) := (others => '0');
+    signal new_band_detect_b1      : std_logic_vector(  3 downto 0) := (others => '0');
+    signal rach_freq_offset_b0     : std_logic_array24( 3 downto 0) := (others => (others => '0'));
+    signal rach_freq_offset_b1     : std_logic_array24( 3 downto 0) := (others => (others => '0'));
+    signal rach_start_prbc_b0      : std_logic_array10( 3 downto 0) := (others => (others => '0'));
+    signal rach_start_prbc_b1      : std_logic_array10( 3 downto 0) := (others => (others => '0'));
+    signal rach_enable_b0          : std_logic_vector(  3 downto 0) := (others => '0');
+    signal rach_enable_b1          : std_logic_vector(  3 downto 0) := (others => '0');
+
+    signal ra_filter_index         : std_logic_vector(  3 downto 0);
+    signal ra_time_offset          : std_logic_vector( 15 downto 0);
+    signal ra_frame_structure      : std_logic_vector(  7 downto 0);
+    signal ra_cplength             : std_logic_vector( 15 downto 0);
+    signal ra_freq_offset          : std_logic_vector( 23 downto 0);
+    signal ra_start_prbc           : std_logic_vector(  9 downto 0);
+    signal ra_num_prbc             : std_logic_vector(  7 downto 0);
+    signal ra_num_psymbol          : std_logic_vector(  3 downto 0);
+    signal ra_num_ro               : std_logic_vector(  2 downto 0);
+
+    signal eAxC_ID                 : std_logic_vector( 15 downto 0) := (others => '0');
+    signal dl_up_only_mode         : std_logic := '0';
+
+
+begin
+
+
+--===============================================================================================================
+--  C-Plane Parameter mapping
+--===============================================================================================================
+
+    data_direction   <= CP_PARAMETER(31);                  num_section     <= CP_PARAMETER(31+32 downto 24+32);
+    filter_index     <= CP_PARAMETER(27 downto 24);        section_type    <= CP_PARAMETER(23+32 downto 16+32);
+    frame_id         <= CP_PARAMETER(23 downto 16);        time_offset     <= CP_PARAMETER(15+32 downto  0+32);
+    subframe_id      <= CP_PARAMETER(15 downto 12);        frame_structure <= CP_PARAMETER(31+64 downto 24+64);
+    slot_id          <= CP_PARAMETER(11 downto  6);        cpLength        <= CP_PARAMETER(23+64 downto  8+64);
+    start_symbol_id  <= CP_PARAMETER( 5 downto  0);
+
+    section_id       <= CP_PARAMETER(31+96 downto 20+96);  re_mask         <= CP_PARAMETER(31+128 downto 20+128);
+    rb               <= CP_PARAMETER(19+96);               num_symbol      <= CP_PARAMETER(19+128 downto 16+128);
+    symInc           <= CP_PARAMETER(18+96);               ef              <= CP_PARAMETER(15+128);
+    start_prbc       <= CP_PARAMETER(17+96 downto  8+96);  beamId          <= CP_PARAMETER(14+128 downto  0+128);
+    num_prbc         <= CP_PARAMETER( 7+96 downto  0+96);  freq_offset     <= CP_PARAMETER(31+160 downto  8+160);
+
+    beamId_group     <= CP_PARAMETER(192+(15*3)-1 downto 192);
+    numPortc         <= CP_PARAMETER(192+(15*3)+5 downto 192+(15*3));
+
+    eAxC_ID          <= CP_PARAMETER(192+(15*3)+21 downto 192+(15*3)+6);
+
+--===============================================================================================================
+--  DL processing
+--===============================================================================================================
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           dl_adv_symbol_sync_d <= dl_adv_symbol_sync_d(14 downto 0) & DL_ADV_SYMBOL_SYNC;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SLOT_SYNC = '1') then
+              dl_mem_clr_en <= '1';
+              dl_mem_clr_cnt <= (others => '0');
+              dl_mem_clr_ch_cnt <= (others => '0');
+           elsif (CP_UPDATE = '0' or data_direction = '0') then
+              if (dl_mem_clr_ch_cnt = CH_NUM - 1) then
+-- 211223_EXT10              if (dl_mem_clr_ch_cnt = CH_NUM - 1 - 1) then
+                 if (dl_mem_clr_cnt = SECTION_NUM - 1) then
+                    dl_mem_clr_en <= '0';
+                 else
+                    dl_mem_clr_cnt <= dl_mem_clr_cnt + '1';
+                    dl_mem_clr_ch_cnt <= dl_mem_clr_ch_cnt + '1';
+                 end if;
+              else
+                 dl_mem_clr_ch_cnt <= dl_mem_clr_ch_cnt + '1';
+              end if;
+           end if;
+        end if;
+    end process;
+
+    -- When SCS is 15kHz, slot_id should be replaced to subframe_id because it is always 0.
+    dl_slot_index <= subframe_id(0) when SCS = 15 else slot_id(0);
+
+    u_dl_ch_section_cnt :  for i in CH_NUM-1 downto 0 generate
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SLOT_SYNC = '1' and DL_ADV_SLOT_IDX(0) = '1') then
+              slot0_dl_section_cnt(i) <= (others => '0');
+           elsif (CP_UPDATE = '1' and data_direction = '1') and (dl_slot_index = '0' and CP_CH_IDX = i) then
+              slot0_dl_section_cnt(i) <= slot0_dl_section_cnt(i) + '1';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SLOT_SYNC = '1' and DL_ADV_SLOT_IDX(0) = '0') then
+              slot1_dl_section_cnt(i) <= (others => '0');
+           elsif (CP_UPDATE = '1' and data_direction = '1') and (dl_slot_index = '1' and CP_CH_IDX = i) then
+              slot1_dl_section_cnt(i) <= slot1_dl_section_cnt(i) + '1';
+           end if;
+        end if;
+    end process;
+
+    end generate;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           for i in CH_NUM-1 downto 0 loop
+              if (CP_CH_IDX = i) then
+                 if (dl_slot_index = '0') then
+                    dl_section_index <= slot0_dl_section_cnt(i);
+                 else
+                    dl_section_index <= slot1_dl_section_cnt(i);
+                 end if;
+              end if;
+           end loop;
+        end if;
+    end process;
+
+    -- rb_indicator
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SLOT_SYNC = '1' and DL_ADV_SLOT_IDX(0) = '1') then
+              slot0_rb_indicator <= '0';
+           elsif (CP_UPDATE = '1' and data_direction = '1') and (dl_slot_index = '0' and rb = '1') then
+              slot0_rb_indicator <= '1';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SLOT_SYNC = '1' and DL_ADV_SLOT_IDX(0) = '0') then
+              slot1_rb_indicator <= '0';
+           elsif (CP_UPDATE = '1' and data_direction = '1') and (dl_slot_index = '1' and rb = '1') then
+              slot1_rb_indicator <= '1';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SLOT_IDX(0) = '0') then
+              rb_indicator <= slot0_rb_indicator;
+           else
+              rb_indicator <= slot1_rb_indicator;
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SYMBOL_SYNC = '1') then
+              dl_up_only_mode <= UP_ONLY_DL_MODE;
+           else
+              dl_up_only_mode <= dl_up_only_mode;
+           end if;
+        end if;
+    end process;
+
+--===============================================================================================================
+--  Sector Mode Detection & Read Address Processing
+--===============================================================================================================
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (CP_UPDATE = '1') then
+              if (numPortc = 0) then
+                 ext10_en <= '0';
+              else
+                 ext10_en <= '1';
+              end if;
+        --      if (numPortc = 1) then
+        --         sector_mode_en <= '1';
+        --      elsif (numPortc = 3) then
+        --         sector_mode_en <= '0';
+        --      end if;
+           end if;
+            sector_mode_en <= '0';
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (ext10_en = '0') then
+              dl_cp_ch_idx_ext10 <= CP_CH_IDX(CH_NUM_WIDTH - 1 downto 0);
+              dl_rd_ch_idx_ext10 <= dl_rd_ch_idx;
+              dl_next_ch_idx_ext10 <= dl_next_ch_idx;
+           else
+              -- if (sector_mode_en = '1') then
+              --    dl_cp_ch_idx_ext10 <= "0" & CP_CH_IDX(CH_NUM_WIDTH - 1 downto 1);
+              --    dl_rd_ch_idx_ext10 <= "0" & dl_rd_ch_idx(CH_NUM_WIDTH - 1 downto 1);
+              --    dl_next_ch_idx_ext10 <= "0" & dl_next_ch_idx(CH_NUM_WIDTH - 1 downto 1);
+              -- else
+              --   dl_cp_ch_idx_ext10 <= "00" & CP_CH_IDX(CH_NUM_WIDTH - 1 downto 2);
+              --   dl_rd_ch_idx_ext10 <= "00" & dl_rd_ch_idx(CH_NUM_WIDTH - 1 downto 2);
+              --   dl_next_ch_idx_ext10 <= "00" & dl_next_ch_idx(CH_NUM_WIDTH - 1 downto 2);
+              --end if;
+
+              dl_cp_ch_idx_ext10 <= (others => '0'); -- "00" & CP_CH_IDX(CH_NUM_WIDTH - 1 downto 2);
+              dl_rd_ch_idx_ext10 <= (others => '0'); -- "00" & dl_rd_ch_idx(CH_NUM_WIDTH - 1 downto 2);
+              dl_next_ch_idx_ext10 <= (others => '0'); -- "00" & dl_next_ch_idx(CH_NUM_WIDTH - 1 downto 2);
+           end if;
+        end if;
+    end process;
+
+--===============================================================================================================
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (CP_UPDATE = '1' and data_direction = '1') or (dl_mem_clr_en = '1') then
+              ena(1) <= '1';
+           else
+              ena(1) <= '0';
+           end if;
+           if (CP_UPDATE = '0' or data_direction = '0') and (dl_mem_clr_en = '1') then
+              addra_dl <= dl_mem_clr_ch_cnt & (not DL_ADV_SLOT_IDX(0)) & dl_mem_clr_cnt;
+              dina_dl <= (others => '0');
+           else
+-- 211223_EXT10              addra_dl <= CP_CH_IDX(CH_NUM_WIDTH - 1 downto 0) & dl_slot_index & dl_section_index;
+              addra_dl <= dl_cp_ch_idx_ext10 & dl_slot_index & dl_section_index;
+              -- Cat.B / SU-MIMO (optional BF)
+              dina_dl <= beamId_group & beamId & numPortc(3 downto 0) & start_symbol_id(3 downto 0) & num_symbol & start_prbc(7 downto 0) & num_prbc & re_mask;
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (DL_ADV_SYMBOL_SYNC = '1') then
+              dl_rd_ch_idx <= (others => '0');
+           else
+              if (DL_ADV_SYMBOL_CH_SYNC = '1') then
+                 dl_rd_ch_idx <= dl_rd_ch_idx + '1';
+              end if;
+           end if;
+        end if;
+    end process;
+
+    u_iFFT_SHIFT_NO : if iFFT_k0_SHIFT = FALSE generate
+       iFFT_shift <= (others => '0');
+       i_rd_cnt_max_value <= 0 when RE_SIZE = 0 else RE_SIZE - 1;
+    end generate;
+
+    u_iFFT_SHIFT_with_PADDING : if iFFT_k0_SHIFT = TRUE and iFFT_ZERO_PADDING = TRUE generate
+       iFFT_shift <= conv_std_logic_vector(RE_SIZE/2, iFFT_WIDTH) - K0(iFFT_WIDTH - 1 downto 0);
+       i_rd_cnt_max_value <= 2**(BW_iFFT_WIDTH)- 1;
+    end generate;
+
+    u_iFFT_SHIFT_without_PADDING : if iFFT_k0_SHIFT = TRUE and iFFT_ZERO_PADDING = FALSE generate
+       iFFT_shift <= conv_std_logic_vector(RE_SIZE/2, iFFT_WIDTH) - K0(iFFT_WIDTH - 1 downto 0);
+       i_rd_cnt_max_value <= 0 when RE_SIZE = 0 else RE_SIZE - 1;
+    end generate;
+
+--    read address should consider K0 offset odd/even !!!
+--    iFFTshift / Non-zero-padding (need to be checked when non-zero K0 !!!)
+
+--    i_k0 <= conv_integer(K0);
+--    i_re_shift <= ((11 + (i_k0 mod 12)) mod 12);     -- even RB
+--    i_re_shift <= ((6 + 11 + (i_k0 mod 12)) mod 12); -- odd RB
+
+    i_re_shift <= (11 - (conv_integer(iFFT_shift) mod 12));
+
+    process (RE_SIZE,iFFT_shift)
+    begin
+        if (RE_SIZE = 0) then
+           i_rd_cnt_complete <= 0;
+        else
+           if (iFFT_shift = 0) then
+              i_rd_cnt_complete <= (RE_SIZE - 1);
+           else
+              i_rd_cnt_complete <= conv_integer(iFFT_shift  - '1');
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           dl_adv_symbol_ch_sync_d <= dl_adv_symbol_ch_sync_d(14 downto 0) & DL_ADV_SYMBOL_CH_SYNC;
+        end if;
+    end process;
+
+    dl_rd_ch_sync <= dl_adv_symbol_ch_sync_d(ADD_LATENCY) when VENDOR = "XILINX" else dl_adv_symbol_ch_sync_d(0);
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           dl_rd_ch_sync_d <= dl_rd_ch_sync_d(0) & dl_rd_ch_sync;
+           if (SYSTEM_MODE = '0') then
+              if (dl_rd_ch_sync = '1') then
+                 i_rd_cnt <= conv_std_logic_vector(RE_SIZE, iFFT_WIDTH);
+              elsif (dl_rd_ch_sync_d(0) = '1') then
+                 i_rd_cnt <= iFFT_shift;
+              else
+                 if (i_rd_cnt = i_rd_cnt_max_value - 1) then
+                    i_rd_cnt <= (others => '0');
+                 else
+                    i_rd_cnt <= i_rd_cnt + '1';
+                 end if;
+              end if;
+           else
+              if (dl_rd_ch_sync = '1') then
+                 i_rd_cnt <= iFFT_shift;
+              else
+                 if (i_rd_cnt = i_rd_cnt_max_value) then
+                    i_rd_cnt <= (others => '0');
+                 else
+                    i_rd_cnt <= i_rd_cnt + '1';
+                 end if;
+              end if;
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_rd_ch_sync = '1') then
+              dl_rd_en <= '1';
+           else
+              if (i_rd_cnt = i_rd_cnt_complete) then
+                 dl_rd_en <= '0';
+              end if;
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_rd_ch_sync = '1' or dl_rd_en = '0') then
+              dl_rd_rb_cnt <= 0;
+           else
+              if (dl_rd_rb_cnt = RB_SIZE) then
+                 if (i_rd_cnt = 0) then
+                    dl_rd_rb_cnt <= 0;
+                 elsif (SYSTEM_MODE = '0' and dl_rd_ch_sync_d(1) = '1') then
+                    dl_rd_rb_cnt <= conv_integer(i_rd_cnt)/12;
+                 end if;
+              else
+                 dl_rd_rb_cnt <= conv_integer(i_rd_cnt)/12;
+              end if;
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           dl_rd_en_d <= dl_rd_en_d(0) & dl_rd_en;
+           if (dl_rd_en_d(0) = '1') then
+              enb(1) <= '1';
+-- 211223_EXT10              addrb_dl <= dl_rd_ch_idx & DL_ADV_SLOT_IDX(0) & dl_section_map(dl_rd_rb_cnt);
+              addrb_dl <= dl_rd_ch_idx_ext10 & DL_ADV_SLOT_IDX(0) & dl_section_map(dl_rd_rb_cnt);
+           elsif (dl_section_map_en = '1') then
+              enb(1) <= '1';
+              addrb_dl <= dl_section_cnt;
+           else
+              enb(1) <= '0';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (i_dl_valid = '0' and enb(1) = '1') then
+              dl_rd_re_cnt <= i_re_shift;
+           else
+              if (dl_rd_en_d(1) = '1') then   -- use only for simulation
+                 if (i_rd_cnt = 0) then
+                    dl_rd_re_cnt <= 1;
+                 else
+                    if (dl_rd_re_cnt = 0) then
+                       dl_rd_re_cnt <= 11;
+                    else
+                       dl_rd_re_cnt <= dl_rd_re_cnt - 1;
+                    end if;
+                 end if;
+              end if;                         -- use only for simulation
+           end if;
+           i_dl_valid <= dl_rd_en_d(1);
+        end if;
+    end process;
+
+    dl_next_ch_idx <= dl_rd_ch_idx + '1';
+
+    -- dl_next_symbol_idx  <= 0 when (DL_ADV_SYMBOL_IDX = 13) else (i_dl_adv_symbol_idx + 1);
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_rd_en = '1' and dl_rd_ch_idx = CH_NUM - 1) then
+              if (DL_ADV_SYMBOL_IDX = 13) then
+                 dl_next_symbol_idx  <= (others => '0');
+              else
+                 dl_next_symbol_idx  <= DL_ADV_SYMBOL_IDX + '1';
+              end if;
+           end if;
+        end if;
+    end process;
+
+    i_zeros <= (others => '0');
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_rd_en_d(0) = '1' and dl_rd_en = '0') then
+              dl_section_map_start <= '1';
+           else
+              dl_section_map_start <= '0';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_section_map_start = '1') then
+              dl_section_map_en <= '1';
+           elsif (dl_section_cnt(SECTION_NUM_WIDTH - 1 downto 0) = SECTION_NUM - 1) then
+              dl_section_map_en <= '0';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_section_map_en = '1') then
+              if (dl_section_cnt(SECTION_NUM_WIDTH - 1 downto 0) = SECTION_NUM - 1) then
+                 dl_section_cnt <= dl_section_cnt;
+              else
+                 dl_section_cnt <= dl_section_cnt + '1';
+              end if;
+           else
+              if (DL_ADV_SYMBOL_IDX = 13 and dl_rd_ch_idx = CH_NUM - 1) then
+                 dl_section_cnt <= i_zeros(CH_NUM_WIDTH - 1 downto 0) & (not DL_ADV_SLOT_IDX(0)) & i_zeros(SECTION_NUM_WIDTH - 1 downto 0);
+              else
+-- 211223_EXT10                 dl_section_cnt <= dl_next_ch_idx & DL_ADV_SLOT_IDX(0) & i_zeros(SECTION_NUM_WIDTH - 1 downto 0);
+                 dl_section_cnt <= dl_next_ch_idx_ext10 & DL_ADV_SLOT_IDX(0) & i_zeros(SECTION_NUM_WIDTH - 1 downto 0);
+              end if;
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           dl_start_symbol <= doutb_dl(35 downto 32);
+           dl_num_symbol   <= doutb_dl(31 downto 28);
+           dl_end_symbol   <= doutb_dl(35 downto 32) + doutb_dl(31 downto 28);
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           dl_section_map_en_d <= dl_section_map_en_d(1 downto 0) & dl_section_map_en;
+           if (dl_section_map_en_d(2) = '1' and (dl_start_symbol <= dl_next_symbol_idx) and (dl_next_symbol_idx < dl_end_symbol)) then
+              dl_section_valid <= '1';
+           else
+              dl_section_valid <= '0';
+           end if;
+        end if;
+    end process;
+
+    dl_num_prbc <= "0" & doutb_dl(19 downto 12);
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_num_prbc = 0) then
+              dl_start_prbc <= (others => '0');
+           else
+              dl_start_prbc <= "0" & doutb_dl(29 - 2 downto 20);
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_num_prbc = 0) then -- dl_num_prbc = 0 : all PRBs
+              dl_end_prbc <= conv_std_logic_vector(RB_SIZE,9);
+           else
+              dl_end_prbc <= ("0" & doutb_dl(29 - 2 downto 20)) + ("0" & doutb_dl(19 downto 12));
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           for i in Max_RB_NUM downto 0 loop
+              if (dl_start_prbc <= i and i < dl_end_prbc) then
+                 dl_rb_valid(i) <= '1';
+              else
+                 dl_rb_valid(i) <= '0';
+              end if;
+           end loop;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           addrb_dl_d1 <= addrb_dl;
+           addrb_dl_d2 <= addrb_dl_d1;
+           addrb_dl_d3 <= addrb_dl_d2;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           for i in Max_RB_NUM downto 0 loop
+              if (dl_section_map_start = '1') then
+                 dl_section_map(i) <= (others => '1');
+              elsif (dl_section_valid = '1' and dl_rb_valid(i) = '1') then
+                 dl_section_map(i) <= addrb_dl_d3(SECTION_NUM_WIDTH - 1 downto 0);
+              end if;
+           end loop;
+        end if;
+    end process;
+
+    -- latency : 1 clk
+    DL_CP_MEM : CP_MEMORY
+    generic map
+    (
+    VENDOR             => VENDOR,
+    ADDR_WIDTH         => ADDR_WIDTH,
+    DATA_WIDTH         => DATA_WIDTH
+    )
+    port map(
+    CLK                => CLK,
+    WEA                => ena(1),
+    ENA                => ena(1),
+    ENB                => enb(1),
+    ADDRA              => addra_dl(ADDR_WIDTH - 1 downto 0),
+    ADDRB              => addrb_dl(ADDR_WIDTH - 1 downto 0),
+    DIA                => dina_dl(DATA_WIDTH - 1 downto 0),
+    DOB                => doutb_dl(DATA_WIDTH - 1 downto 0)
+    );
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (CP_UPDATE = '1') then
+              DL_FRAME_INDEX <= frame_id;
+           end if;
+        end if;
+    end process;
+
+    u_SCS <= x"0" when SCS = 15 else x"1" when SCS = 30 else x"2" when SCS = 60 else x"3" when SCS = 120 else x"4";
+
+    DL_FRAME_STRUCTURE <= conv_std_logic_vector(BW_iFFT_WIDTH, 4) & u_SCS;
+
+    u_DL_VALID_GEN : for i in (Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM) - 1 downto 0 generate
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (dl_rd_ch_idx = (i mod CH_NUM)) then
+              DL_VALID(i)   <= i_dl_valid and TDD_DL_EN(i);
+           else
+              DL_VALID(i)   <= '0';
+           end if;
+        end if;
+    end process;
+    end generate;
+
+    u_DL_REMASK_GEN : for i in (Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM) - 1 downto 0 generate
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (i_dl_valid = '1' and TDD_DL_EN(i) = '1' and dl_rd_ch_idx = (i mod CH_NUM)) then
+              if (rb_indicator = '1' or dl_up_only_mode = '1') then
+                 DL_RE_MASK(i)   <= '1';
+              else
+                 DL_RE_MASK(i)   <= doutb_dl(dl_rd_re_cnt);
+              end if;
+           else
+              DL_RE_MASK(i)   <= '0';
+           end if;
+        end if;
+    end process;
+    end generate;
+
+    u_Cat_A_Support : if Category = "A" generate
+       DL_MuSu_nLayer <= (others => '0');
+       DL_BEAMID      <= (others => '0');
+    end generate;
+
+    u_Cat_B_Support : if Category = "B" generate
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (Opt_BF_Support = 1) then
+              DL_MuSu_nLayer <= ('0' & doutb_dl(39 downto 36)) + '1';
+           else
+              DL_MuSu_nLayer <= (others => '0');
+           end if;
+        end if;
+    end process;
+
+    u_DL_BEAMID_GEN : for i in (Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM) - 1 downto 0 generate
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (i_dl_valid = '1' and dl_rd_ch_idx = (i mod CH_NUM)) then
+              DL_BEAMID(15*(i+1)-1 downto 15*(i)) <= doutb_dl(40+(15*(i+1))-1 downto 40+(15*(i)));
+           else
+              DL_BEAMID(15*(i+1)-1 downto 15*(i)) <= (others => '0');
+           end if;
+        end if;
+    end process;
+    end generate;
+
+    end generate;
+
+    -- just for simulation
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           i_dl_valid_d <= i_dl_valid;
+           doutb_dl_d   <= doutb_dl;
+        end if;
+    end process;
+
+    i_re_mask <= doutb_dl_d(11 downto 0) when i_dl_valid_d = '1' else (others => '0');
+
+    u_Cat_A_Support_Sim : if Category = "A" generate
+       i_dl_beamid <= (others => (others => '0'));
+    end generate;
+
+    u_Cat_B_Support_Sim : if Category = "B" generate
+    u_DL_BEAMID_GEN : for i in (Opt_BF_Support*(DL_LAYER_NUM - CH_NUM) + CH_NUM) - 1 downto 0 generate
+       i_dl_beamid(i) <= doutb_dl_d(40+(15*(i+1))-1 downto 40+(15*(i))) when (i_dl_valid_d = '1' and dl_rd_ch_idx = (i mod CH_NUM)) else (others => '0');
+    end generate;
+    end generate;
+
+--===============================================================================================================
+--  UL processing
+--===============================================================================================================
+
+--===============================================================================================================
+--  LTE_eMTC (PRACH)
+--===============================================================================================================
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (data_direction = '0' and section_type(1 downto 0) = 3) then
+              rach_section_valid <= '1';
+           else
+              rach_section_valid <= '0';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (filter_index(1 downto 0) /= "00") then
+              prach_enable <= '1';
+           else
+              prach_enable <= '0';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (CP_UPDATE = '1' and rach_section_valid = '1' and prach_enable = '1') then
+              if (CP_CH_IDX(1) = '0') then
+                 rach_cp_valid(0) <= '1';
+              else
+                 rach_cp_valid(0) <= '0';
+              end if;
+           else
+              rach_cp_valid(0) <= '0';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (CP_UPDATE = '1' and rach_section_valid = '1' and prach_enable = '1') then
+              --if (CP_CH_IDX(1) = '1' or numPortc = 3) then
+              if (CP_CH_IDX(1) = '1' or numPortc = 1) then
+                 rach_cp_valid(1) <= '1';
+              else
+                 rach_cp_valid(1) <= '0';
+              end if;
+           else
+              rach_cp_valid(1) <= '0';
+           end if;
+        end if;
+    end process;
+
+    -- DL: 4T4R 2CC, UL: 4T4R 1CC (DL 1CC is SDL Cell)
+    rach_cp_valid(2) <= '0';
+    rach_cp_valid(3) <= '0';
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           band_freq_offset <= freq_offset;
+           band_start_prbc  <= start_prbc;
+        end if;
+    end process;
+
+    u_PRACH_4Sector_Band_DETECT : for i in 1 downto 0 generate -- 2T2R 4Sector, Max 2 Band
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (rach_freq_offset_b0(i) = freq_offset and rach_start_prbc_b0(i) = start_prbc) then
+              new_band_detect_b0(i) <= '0';
+           else
+              new_band_detect_b0(i) <= '1';
+           end if;
+        end if;
+    end process;
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (rach_freq_offset_b1(i) = freq_offset and rach_start_prbc_b1(i) = start_prbc) then
+              new_band_detect_b1(i) <= '0';
+           else
+              new_band_detect_b1(i) <= '1';
+           end if;
+        end if;
+    end process;
+
+    rach_enable_b0(i) <= rach_cp_valid(i) and (not new_band_detect_b0(i));
+    rach_enable_b1(i) <= rach_cp_valid(i) and (not new_band_detect_b1(i));
+
+    -- RACH MAP LEARNING
+
+    process (CLK)
+    begin
+        if (CLK'event and CLK = '1') then
+           if (rach_cp_valid(i) = '1') then
+              case rach_band(i) is
+                 when "00"  => rach_band(i) <= "01";
+                               rach_freq_offset_b0(i) <= band_freq_offset; rach_freq_offset_b1(i) <= (others => '1');
+                               rach_start_prbc_b0(i)  <= band_start_prbc;  rach_start_prbc_b1(i) <= (others => '1');
+                 when "01"  => if (new_band_detect_b0(i) = '1') then
+                                  rach_band(i) <= "10";
+                                  rach_freq_offset_b1(i) <= band_freq_offset;
+                                  rach_start_prbc_b1(i)  <= band_start_prbc;
+                               end if;
+                 when "10"  => if (new_band_detect_b0(i) = '1' and new_band_detect_b1(i) = '1') then
+                                  rach_band(i) <= "00";
+                               end if;
+                 when others => rach_band(i) <= "00";
+              end case;
+           end if;
+        end if;
+    end process;
+
+    end generate;
+
+    -- MJANG Review
+
+--    u_2T2R_4Sector : for i in 1 downto 0 generate -- 1 PATH : 2T2R 1Sector
+    u_2T2R_4Sector : for i in 0 downto 0 generate -- 1 PATH : 2T2R 1Sector
+
+    DSS_RACH_Band0 : RA_MODULE -- PRACH
+    generic map(
+    PATH_NUM                       => 1
+    )
+    port map(
+
+    CLK                            => CLK,
+
+    --------------------------------------------------------------------------------
+    -- CP_PARSER
+    --------------------------------------------------------------------------------
+
+    MODULE_EN                      => rach_cp_valid(0), --rach_enable_b0(i),
+    CP_UPDATE                      => CP_UPDATE,
+    CP_CH_IDX                      => CP_CH_IDX,
+    NUM_PORTC                      => numPortc,
+    DATA_DIRECTION                 => data_direction,
+    FILTER_INDEX                   => filter_index,
+    SUBFRAME_ID                    => subframe_id,
+    SLOT_ID                        => slot_id,
+    START_SYMBOL_ID                => start_symbol_id,
+    SECTION_TYPE                   => section_type,
+    TIME_OFFSET                    => time_offset,
+    FRAME_STRUCTURE                => frame_structure,
+    CPLENGTH                       => cpLength,
+    FREQ_OFFSET                    => freq_offset,
+    START_PRBC                     => start_prbc,
+    NUM_PRBC                       => num_prbc,
+    NUM_SYMBOL                     => num_symbol,
+
+    --------------------------------------------------------------------------------
+    -- UL Sync Retard
+    --------------------------------------------------------------------------------
+
+    UL_RTD_SBF_SYNC                => UL_RTD_SBF_SYNC,
+    UL_RTD_SBF_IDX                 => UL_RTD_SBF_IDX,
+    UL_RTD_SLOT_SYNC               => UL_RTD_SLOT_SYNC,
+    UL_RTD_SLOT_IDX                => UL_RTD_SLOT_IDX,
+    UL_RTD_SYMBOL_SYNC             => UL_RTD_SYMBOL_SYNC,
+    UL_RTD_SYMBOL_IDX              => UL_RTD_SYMBOL_IDX,
+
+    --------------------------------------------------------------------------------
+    -- RAFE
+    --------------------------------------------------------------------------------
+
+    UL_FILTER_INDEX                => ra_filter_index,
+    UL_TIME_OFFSET                 => ra_time_offset,
+    UL_FRAME_STRUCTURE             => ra_frame_structure,
+    UL_CPLENGTH                    => ra_cplength,
+    UL_FREQ_OFFSET                 => ra_freq_offset,
+    UL_START_PRBC                  => ra_start_prbc,
+    UL_NUM_PRBC                    => ra_num_prbc,
+    UL_NUM_PSYMBOL                 => ra_num_psymbol,
+    UL_NUM_RO                      => ra_num_ro
+    );
+
+--    DSS_RACH_Band1 : RA_MODULE -- eMTC PRACH
+--    generic map(
+--    PATH_NUM                       => 1
+--    )
+--    port map(
+
+--    CLK                            => CLK,
+
+--    --------------------------------------------------------------------------------
+--    -- CP_PARSER
+--    --------------------------------------------------------------------------------
+
+--    MODULE_EN                      => rach_enable_b1(i),
+--    CP_UPDATE                      => CP_UPDATE,
+--    CP_CH_IDX                      => CP_CH_IDX,
+--    NUM_PORTC                      => numPortc,
+--    DATA_DIRECTION                 => data_direction,
+--    FILTER_INDEX                   => filter_index,
+--    SUBFRAME_ID                    => subframe_id,
+--    SLOT_ID                        => slot_id,
+--    START_SYMBOL_ID                => start_symbol_id,
+--    SECTION_TYPE                   => section_type,
+--    TIME_OFFSET                    => time_offset,
+--    FRAME_STRUCTURE                => frame_structure,
+--    CPLENGTH                       => cpLength,
+--    FREQ_OFFSET                    => freq_offset,
+--    START_PRBC                     => start_prbc,
+--    NUM_PRBC                       => num_prbc,
+--    NUM_SYMBOL                     => num_symbol,
+
+--    --------------------------------------------------------------------------------
+--    -- UL Sync Retard
+--    --------------------------------------------------------------------------------
+
+--    UL_RTD_SBF_SYNC                => UL_RTD_SBF_SYNC,
+--    UL_RTD_SBF_IDX                 => UL_RTD_SBF_IDX,
+--    UL_RTD_SLOT_SYNC               => UL_RTD_SLOT_SYNC,
+--    UL_RTD_SLOT_IDX                => UL_RTD_SLOT_IDX,
+--    UL_RTD_SYMBOL_SYNC             => UL_RTD_SYMBOL_SYNC,
+--    UL_RTD_SYMBOL_IDX              => UL_RTD_SYMBOL_IDX,
+
+--    --------------------------------------------------------------------------------
+--    -- RAFE
+--    --------------------------------------------------------------------------------
+
+--    UL_FILTER_INDEX                => UL_eMTC_FILTER_INDEX(4*(i+1)-1 downto 4*i),
+--    UL_TIME_OFFSET                 => UL_eMTC_TIME_OFFSET(16*(i+1)-1 downto 16*i),
+--    UL_FRAME_STRUCTURE             => UL_eMTC_FRAME_STRUCTURE(8*(i+1)-1 downto 8*i),
+--    UL_CPLENGTH                    => UL_eMTC_CPLENGTH(16*(i+1)-1 downto 16*i),
+--    UL_FREQ_OFFSET                 => UL_eMTC_FREQ_OFFSET(24*(i+1)-1 downto 24*i),
+--    UL_START_PRBC                  => UL_eMTC_START_PRBC(10*(i+1)-1 downto 10*i),
+--    UL_NUM_PRBC                    => UL_eMTC_NUM_PRBC(8*(i+1)-1 downto 8*i),
+--    UL_NUM_PSYMBOL                 => UL_eMTC_NUM_PSYMBOL(4*(i+1)-1 downto 4*i),
+--    UL_NUM_RO                      => UL_eMTC_NUM_RO(3*(i+1)-1 downto 3*i)
+--    );
+
+    end generate;
+
+    u_PRACH_PATH : for p in CH_NUM-1 downto 0 generate
+    UL_FILTER_INDEX( 4*(p+1)-1 downto  4*p)  <= ra_filter_index;
+    UL_TIME_OFFSET (16*(p+1)-1 downto 16*p)  <= ra_time_offset;
+    UL_FRAME_STRUCTURE(8*(p+1)-1 downto 8*p) <= ra_frame_structure;
+    UL_CPLENGTH    (16*(p+1)-1 downto 16*p)  <= ra_cplength;
+    UL_FREQ_OFFSET (24*(p+1)-1 downto 24*p)  <= ra_freq_offset;
+    UL_START_PRBC  (10*(p+1)-1 downto 10*p)  <= ra_start_prbc;
+    UL_NUM_PRBC    ( 8*(p+1)-1 downto  8*p)  <= ra_num_prbc;
+    UL_NUM_PSYMBOL ( 4*(p+1)-1 downto  4*p)  <= ra_num_psymbol;
+    UL_NUM_RO      ( 3*(p+1)-1 downto  3*p)  <= ra_num_ro;
+    end generate;
+
+end BEHAVE;
