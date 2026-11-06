@@ -1,0 +1,27 @@
+Trên PC: TFTP server phải cho phép ghi file.
+
+Với Tftpd64: vào Settings > TFTP, đặt TFTP Security = None. File sẽ được lưu vào Base Directory.
+Với Windows Firewall: cho phép Tftpd64 đi qua, hoặc tắt tạm firewall nếu transfer bị timeout.
+Trong U-Boot: thay IP bằng IP thật của bạn.
+
+
+setenv ipaddr 192.168.1.10
+setenv serverip 192.168.1.100
+
+sf probe 0 0 0
+sf read 0x08000000 0x0 0x1000000
+crc32 0x08000000 0x1000000
+tftpput 0x08000000 0x1000000 qspi_backup.bin
+Thứ tự tham số là tftpput <địa chỉ RAM> <kích thước> <tên file>.
+
+Kiểm tra: tải file vừa lưu từ PC về một vùng RAM khác rồi so sánh với dữ liệu gốc.
+
+
+tftpboot 0x09000000 qspi_backup.bin
+crc32 0x09000000 0x1000000
+cmp.b 0x08000000 0x09000000 0x1000000
+Kết quả đúng:
+
+tftpboot báo Bytes transferred = 16777216.
+Hai giá trị CRC trùng nhau.
+cmp.b báo Total of 16777216 byte(s) were the same.
